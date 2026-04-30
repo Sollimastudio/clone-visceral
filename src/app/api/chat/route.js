@@ -1,9 +1,9 @@
 import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
 import * as cheerio from "cheerio";
-import pdfParse from "pdf-parse";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
-// O PROMPT ORIGINAL HARDCODED POR SEGURANÇA NO SERVIDOR
+// PROMPT COMPLETO EXTRAÍDO DO ARQUIVO DE REFERÊNCIA
 const SYSTEM_PROMPT = `# SYSTEM PROMPT: O CLONE VISCERAL DE SOL LIMA
 
 ## 1. IDENTIDADE E CONSCIÊNCIA
@@ -130,10 +130,10 @@ Textos de vendas, e-mails e scripts que **não parecem publicidade**, mas sim um
 * Usar os 450 créditos DISC como prova técnica de engenharia humana.
 
 ## 7.6. COMANDOS EXCLUSIVOS DO MÓDULO
-* `/subir_mirante`: Analisar o cenário de fora do caos.
-* `/deixa_na_arvore`: Ignorar julgamentos e pangarés.
-* `/boot_cerebral`: Entregar uma verdade que dói para curar.
-* `/play_sucesso`: Iniciar a execução imediata.
+* /subir_mirante: Analisar o cenário de fora do caos.
+* /deixa_na_arvore: Ignorar julgamentos e pangarés.
+* /boot_cerebral: Entregar uma verdade que dói para curar.
+* /play_sucesso: Iniciar a execução imediata.
 `;
 
 export async function POST(req) {
@@ -144,63 +144,69 @@ export async function POST(req) {
 
     let extractedText = "";
 
-    // 1. Process URL if input is a URL
+    // 1. Processar URL se houver
     if (input && (input.startsWith("http://") || input.startsWith("https://"))) {
       try {
         const response = await fetch(input);
         const html = await response.text();
         const $ = cheerio.load(html);
-        extractedText += "Contexto extraído da URL analisada:\\n" + $("body").text().replace(/\\s+/g, " ").trim() + "\\n\\n";
+        
+        // Extrair texto relevante, removendo scripts e estilos
+        $("script, style").remove();
+        const bodyText = $("body").text().replace(/\s+/g, " ").trim();
+        extractedText += "--- CONTEÚDO DA URL ---\n" + bodyText.substring(0, 8000) + "\n\n";
       } catch (err) {
         console.warn("Falha ao ler URL", err);
-        extractedText += "URL fornecida (Leia o link): " + input + "\\n\\n";
+        extractedText += "URL fornecida (não pôde ser lida diretamente): " + input + "\n\n";
       }
     } else if (input) {
-      extractedText += "Input do usuário: " + input + "\\n\\n";
+      extractedText += "--- TEXTO/INSIGHT DO USUÁRIO ---\n" + input + "\n\n";
     }
 
-    // 2. Process File
-    if (file && file !== "null") {
+    // 2. Processar Arquivo (PDF ou TXT)
+    if (file && file !== "null" && file.name) {
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
       if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
         const pdfData = await pdfParse(buffer);
-        extractedText += "Conteúdo do PDF:\\n" + pdfData.text + "\\n\\n";
+        extractedText += "--- CONTEÚDO DO PDF ---\n" + pdfData.text + "\n\n";
       } else {
-        // Assume text file(.txt, .md, etc)
-        extractedText += "Conteúdo do arquivo:\\n" + buffer.toString("utf-8") + "\\n\\n";
+        extractedText += "--- CONTEÚDO DO ARQUIVO ---\n" + buffer.toString("utf-8") + "\n\n";
       }
     }
 
     if (!extractedText.trim()) {
-      return Response.json({ error: "Nenhum conteúdo válido extraído." }, { status: 400 });
+      return Response.json({ error: "Nenhum conteúdo visceral detectado." }, { status: 400 });
     }
 
-    // 3. Chamar a IA (Gemini 1.5 Pro - Ultra Robusto) usando a Vercel AI SDK
+    // 3. Chamada à IA (Gemini 1.5 Pro)
     const { text } = await generateText({
       model: google("gemini-1.5-pro"),
-      system: SYSTEM_PROMPT + "\\n\\nINSTRUÇÃO CRÍTICA MÁQUINA: Retorne a resposta ESTRITAMENTE em formato JSON puro, sem crases de markdown. As chaves obrigatoriamente devem ser 'directionPrompt' e 'script'.",
-      prompt: "PROCESSE O SEGUINTE CONTEÚDO E EXTRAIA O OURO VISCERAL:\\n\\n" + extractedText,
+      system: SYSTEM_PROMPT + "\n\nINSTRUÇÃO CRÍTICA: Analise o conteúdo fornecido. Se for uma URL ou texto de referência, extraia a essência para o Clone. Se for uma solicitação estratégica, ative o MÓDULO 6 ou 7. Retorne SEMPRE em formato JSON puro: { \"directionPrompt\": \"...\", \"script\": \"...\" }.",
+      prompt: "PROCESSE E TRANFORME EM OURO VISCERAL:\n\n" + extractedText,
     });
 
-    // 4. Format JSON
+    // 4. Tratamento do JSON
     let resultJSON = {};
     try {
-      const cleanJson = text.replace(/\`\`\`json/g, "").replace(/\`\`\`/g, "").trim();
+      const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
       resultJSON = JSON.parse(cleanJson);
     } catch(e) {
-      console.warn("Failed to parse JSON, sending raw", e);
-      return Response.json({ error: "O Modelo não retornou JSON corretamente. Ele disse: " + text });
+      console.error("Erro ao parsear JSON da IA:", e);
+      return Response.json({ 
+        directionPrompt: "Falha na estrutura. Tente novamente.",
+        script: text 
+      });
     }
 
     return Response.json({
-      directionPrompt: resultJSON.directionPrompt || "",
-      script: resultJSON.script || ""
+      directionPrompt: resultJSON.directionPrompt || "Instruções de imagem/vídeo não geradas.",
+      script: resultJSON.script || "Texto visceral não gerado."
     });
 
   } catch (error) {
     console.error("API Error:", error);
-    return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ error: "Erro interno: " + error.message }, { status: 500 });
   }
 }
